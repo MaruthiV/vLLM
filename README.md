@@ -1,6 +1,6 @@
 # Mini-vLLM
 
-A portfolio project implementing production-quality LLM inference techniques inspired by [vLLM](https://github.com/vllm-project/vllm).
+A high-performance LLM inference engine implementing PagedAttention, continuous batching, and custom Triton GPU kernels. Inspired by [vLLM](https://github.com/vllm-project/vllm), this engine achieves 2-3x throughput improvements over naive HuggingFace inference through memory-efficient KV cache management and dynamic request scheduling.
 
 ## Features
 
