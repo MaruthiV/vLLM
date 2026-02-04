@@ -12,60 +12,45 @@ except ImportError:
 if HAS_TRITON:
     @triton.jit
     def _paged_attention_kernel(
-
         output_ptr,
-
         query_ptr,
         key_cache_ptr,
         value_cache_ptr,
         block_tables_ptr,
         context_lens_ptr,
-
         num_heads: tl.constexpr,
         num_kv_heads: tl.constexpr,
         head_dim: tl.constexpr,
         block_size: tl.constexpr,
         max_num_blocks_per_seq: tl.constexpr,
-
         stride_qb,
         stride_qh,
         stride_qd,
-
         stride_kb,
         stride_kh,
         stride_ks,
         stride_kd,
-
         stride_vb,
         stride_vh,
         stride_vs,
         stride_vd,
-
         stride_btb,
         stride_bts,
-
         stride_ob,
         stride_oh,
         stride_od,
-
         scale,
-
         BLOCK_SIZE_M: tl.constexpr,
         BLOCK_SIZE_N: tl.constexpr,
     ):
-
         batch_idx = tl.program_id(0)
         head_idx = tl.program_id(1)
-
         kv_head_idx = head_idx % num_kv_heads
-
         context_len = tl.load(context_lens_ptr + batch_idx)
 
         q_offset = batch_idx * stride_qb + head_idx * stride_qh
-        q = tl.load(
-            query_ptr + q_offset + tl.arange(0, head_dim) * stride_qd,
-            mask=tl.arange(0, head_dim) < head_dim,
-        )
+        d_range = tl.arange(0, head_dim)
+        q = tl.load(query_ptr + q_offset + d_range * stride_qd)
 
         m_i = float("-inf")
         l_i = 0.0
@@ -73,182 +58,47 @@ if HAS_TRITON:
 
         num_blocks = (context_len + block_size - 1) // block_size
 
-        for block_idx in range(num_blocks):
+        for block_idx in range(max_num_blocks_per_seq):
+            should_process = block_idx < num_blocks
 
             block_table_offset = batch_idx * stride_btb + block_idx * stride_bts
             physical_block_id = tl.load(block_tables_ptr + block_table_offset)
 
             start_pos = block_idx * block_size
-            positions = start_pos + tl.arange(0, block_size)
-            valid_mask = positions < context_len
-
-            k_block_offset = (
-                physical_block_id * stride_kb +
-                kv_head_idx * stride_kh
-            )
-
-            qk = tl.zeros([block_size], dtype=tl.float32)
-
-            for d in range(head_dim):
-                k_d = tl.load(
-                    key_cache_ptr + k_block_offset +
-                    tl.arange(0, block_size) * stride_ks + d * stride_kd,
-                    mask=valid_mask,
-                    other=0.0,
-                )
-                qk += q[d] * k_d
-
-            qk = qk * scale
-
-            qk = tl.where(valid_mask, qk, float("-inf"))
-
-            m_ij = tl.max(qk, axis=0)
-            m_new = tl.maximum(m_i, m_ij)
-
-            exp_qk = tl.exp(qk - m_new)
-            exp_sum = tl.sum(exp_qk, axis=0)
-
-            alpha = tl.exp(m_i - m_new)
-            l_new = alpha * l_i + exp_sum
-
-            v_block_offset = (
-                physical_block_id * stride_vb +
-                kv_head_idx * stride_vh
-            )
-
-            for d in range(head_dim):
-                v_d = tl.load(
-                    value_cache_ptr + v_block_offset +
-                    tl.arange(0, block_size) * stride_vs + d * stride_vd,
-                    mask=valid_mask,
-                    other=0.0,
-                )
-
-                acc[d] = alpha * acc[d] + tl.sum(exp_qk * v_d, axis=0)
-
-            m_i = m_new
-            l_i = l_new
-
-        acc = acc / l_i
-
-        o_offset = batch_idx * stride_ob + head_idx * stride_oh
-        tl.store(
-            output_ptr + o_offset + tl.arange(0, head_dim) * stride_od,
-            acc.to(output_ptr.dtype.element_ty),
-            mask=tl.arange(0, head_dim) < head_dim,
-        )
-
-    @triton.jit
-    def _paged_attention_v2_kernel(
-
-        output_ptr,
-        exp_sums_ptr,
-        max_logits_ptr,
-        tmp_output_ptr,
-
-        query_ptr,
-        key_cache_ptr,
-        value_cache_ptr,
-        block_tables_ptr,
-        context_lens_ptr,
-
-        num_heads: tl.constexpr,
-        num_kv_heads: tl.constexpr,
-        head_dim: tl.constexpr,
-        block_size: tl.constexpr,
-        max_num_blocks_per_seq: tl.constexpr,
-        num_partitions: tl.constexpr,
-
-        stride_qb, stride_qh, stride_qd,
-        stride_kb, stride_kh, stride_ks, stride_kd,
-        stride_vb, stride_vh, stride_vs, stride_vd,
-        stride_btb, stride_bts,
-        stride_ob, stride_oh, stride_od,
-
-        scale,
-
-        PARTITION_SIZE: tl.constexpr,
-    ):
-        batch_idx = tl.program_id(0)
-        head_idx = tl.program_id(1)
-        partition_idx = tl.program_id(2)
-
-        kv_head_idx = head_idx % num_kv_heads
-        context_len = tl.load(context_lens_ptr + batch_idx)
-
-        start_block = partition_idx * PARTITION_SIZE
-        end_block = tl.minimum(start_block + PARTITION_SIZE,
-                               (context_len + block_size - 1) // block_size)
-
-        if start_block >= end_block:
-            return
-
-        q_offset = batch_idx * stride_qb + head_idx * stride_qh
-        q = tl.load(
-            query_ptr + q_offset + tl.arange(0, head_dim) * stride_qd,
-            mask=tl.arange(0, head_dim) < head_dim,
-        )
-
-        m_i = float("-inf")
-        l_i = 0.0
-        acc = tl.zeros([head_dim], dtype=tl.float32)
-
-        for block_idx in range(start_block, end_block):
-            block_table_offset = batch_idx * stride_btb + block_idx * stride_bts
-            physical_block_id = tl.load(block_tables_ptr + block_table_offset)
-
-            start_pos = block_idx * block_size
-            positions = start_pos + tl.arange(0, block_size)
-            valid_mask = positions < context_len
+            s_range = tl.arange(0, block_size)
+            positions = start_pos + s_range
+            valid_mask = (positions < context_len) & should_process
 
             k_block_offset = physical_block_id * stride_kb + kv_head_idx * stride_kh
-            qk = tl.zeros([block_size], dtype=tl.float32)
 
-            for d in range(head_dim):
-                k_d = tl.load(
-                    key_cache_ptr + k_block_offset +
-                    tl.arange(0, block_size) * stride_ks + d * stride_kd,
-                    mask=valid_mask, other=0.0,
-                )
-                qk += q[d] * k_d
+            k_ptrs = key_cache_ptr + k_block_offset + s_range[:, None] * stride_ks + d_range[None, :] * stride_kd
+            k = tl.load(k_ptrs, mask=valid_mask[:, None], other=0.0)
 
-            qk = qk * scale
+            qk = tl.sum(q[None, :] * k, axis=1) * scale
             qk = tl.where(valid_mask, qk, float("-inf"))
 
             m_ij = tl.max(qk, axis=0)
             m_new = tl.maximum(m_i, m_ij)
+
             exp_qk = tl.exp(qk - m_new)
-            exp_sum = tl.sum(exp_qk, axis=0)
+            exp_sum = tl.sum(tl.where(valid_mask, exp_qk, 0.0), axis=0)
+
             alpha = tl.exp(m_i - m_new)
             l_new = alpha * l_i + exp_sum
 
             v_block_offset = physical_block_id * stride_vb + kv_head_idx * stride_vh
-            for d in range(head_dim):
-                v_d = tl.load(
-                    value_cache_ptr + v_block_offset +
-                    tl.arange(0, block_size) * stride_vs + d * stride_vd,
-                    mask=valid_mask, other=0.0,
-                )
-                acc[d] = alpha * acc[d] + tl.sum(exp_qk * v_d, axis=0)
+            v_ptrs = value_cache_ptr + v_block_offset + s_range[:, None] * stride_vs + d_range[None, :] * stride_vd
+            v = tl.load(v_ptrs, mask=valid_mask[:, None], other=0.0)
 
-            m_i = m_new
-            l_i = l_new
+            acc = alpha * acc + tl.sum(exp_qk[:, None] * v, axis=0)
 
-        partition_offset = (
-            batch_idx * num_heads * num_partitions +
-            head_idx * num_partitions +
-            partition_idx
-        )
+            m_i = tl.where(should_process, m_new, m_i)
+            l_i = tl.where(should_process, l_new, l_i)
 
-        tl.store(exp_sums_ptr + partition_offset, l_i)
-        tl.store(max_logits_ptr + partition_offset, m_i)
+        acc = acc / l_i
 
-        tmp_offset = partition_offset * head_dim
-        tl.store(
-            tmp_output_ptr + tmp_offset + tl.arange(0, head_dim),
-            acc,
-            mask=tl.arange(0, head_dim) < head_dim,
-        )
+        o_offset = batch_idx * stride_ob + head_idx * stride_oh
+        tl.store(output_ptr + o_offset + d_range * stride_od, acc.to(output_ptr.dtype.element_ty))
 
 def paged_attention_forward(
     query: torch.Tensor,
