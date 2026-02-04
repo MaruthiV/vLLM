@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mini-vllm"
+version = "0.1.0"
+description = "A mini vLLM-style inference engine with paged attention, continuous batching, and more"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # Core ML
+    "torch>=2.1.0",
+    "transformers>=4.36.0",
+    "accelerate>=0.25.0",
+    "safetensors>=0.4.0",
+
+    # Server
+    "fastapi>=0.109.0",
+    "sse-starlette>=1.8.0",
+    "pydantic>=2.5.0",
+    "uvicorn[standard]>=0.27.0",
+
+    # Guided decoding
+    "outlines>=0.0.37",
+
+    # Utils
+    "numpy>=1.24.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.26.0",
+    "matplotlib>=3.8.0",
+    "rich>=13.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+]
+cuda = [
+    "triton>=2.1.0",
+]
+
+[project.scripts]
+mini-vllm = "mini_vllm.entrypoints.openai.api_server:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/mini-vllm"
+Repository = "https://github.com/yourusername/mini-vllm"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mini_vllm*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
