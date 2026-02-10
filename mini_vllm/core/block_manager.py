@@ -204,6 +204,14 @@ class BlockSpaceManager:
             block_table.append_block(block.block_id)
             allocated_blocks.append(block)
 
+        tokens_remaining = num_tokens
+        for block in allocated_blocks:
+            tokens_in_block = min(tokens_remaining, self.block_size)
+            block.computed_tokens = tokens_in_block
+            tokens_remaining -= tokens_in_block
+            if tokens_remaining <= 0:
+                break
+
         self.block_tables[seq_id] = block_table
         self._seq_to_blocks[seq_id] = allocated_blocks
         if token_ids is not None:
