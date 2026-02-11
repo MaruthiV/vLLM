@@ -42,12 +42,24 @@ mini-vllm/
 
 ## Quick Start
 
-### Installation
+### Option 1: Google Colab (Recommended)
+
+The easiest way to run mini-vLLM with GPU support:
+
+1. Open the notebook: [notebooks/full_demo.ipynb](notebooks/full_demo.ipynb)
+2. Click "Open in Colab" or go to [Google Colab](https://colab.research.google.com) → File → Open → GitHub → `https://github.com/MaruthiV/vLLM`
+3. Select `notebooks/full_demo.ipynb`
+4. Runtime → Change runtime type → **T4 GPU**
+5. Run all cells
+
+The notebook demonstrates all features: unit tests, Triton kernel benchmarks, memory efficiency, and text generation.
+
+### Option 2: Local Installation
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/mini-vllm.git
-cd mini-vllm
+git clone https://github.com/MaruthiV/vLLM.git
+cd vLLM
 
 # Install dependencies
 pip install -e .
@@ -274,4 +286,4 @@ MIT License
 
 ## Author
 
-Built as a portfolio project to demonstrate understanding of production LLM serving systems.
+Built by [Maruthi V](https://github.com/MaruthiV)
